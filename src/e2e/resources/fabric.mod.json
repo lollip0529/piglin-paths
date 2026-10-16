@@ -1,0 +1,13 @@
+{
+    "schemaVersion": 1,
+    "id": "piglinpaths-e2e",
+    "version": "0",
+    "name": "piglin paths e2e driver",
+    "environment": "client",
+    "mixins": [
+        "piglinpaths-e2e.mixins.json"
+    ],
+    "depends": {
+        "piglinpaths": "*"
+    }
+}

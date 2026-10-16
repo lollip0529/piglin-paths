@@ -1,0 +1,7 @@
+.gradle/
+build/
+run/
+run-e2e/
+e2e-artifacts/
+libs/*.jar
+e2e*.log

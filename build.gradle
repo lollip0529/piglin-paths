@@ -1,0 +1,120 @@
+plugins {
+    id 'fabric-loom' version "${loom_version}"
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+    archivesName = project.archives_base_name
+}
+
+sourceSets {
+    // a second mod that only exists in the e2e run; it drives a real client and writes e2e-artifacts/
+    e2e {
+        compileClasspath += main.compileClasspath + main.output
+        runtimeClasspath += main.runtimeClasspath + main.output
+    }
+}
+
+loom {
+    mods {
+        piglinpaths {
+            sourceSet sourceSets.main
+        }
+        'piglinpaths-e2e' {
+            sourceSet sourceSets.e2e
+        }
+    }
+
+    runs {
+        e2e {
+            client()
+            name 'piglin paths e2e'
+            source sourceSets.e2e
+            runDir 'run-e2e'
+            programArgs '--width', '1600', '--height', '900'
+            property 'piglinpaths.e2e.out', file('e2e-artifacts').absolutePath
+            // a loader crash should end the run instead of waiting on Fabric's error dialog
+            property 'java.awt.headless', 'true'
+        }
+    }
+}
+
+// -Pbastion=<instance mods dir> loads that instance's whole mod list into the e2e run instead
+def bastion = providers.gradleProperty('bastion')
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
+    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+
+    if (bastion.isPresent()) {
+        // the instance has fabric-api twice, once with a url-encoded name, and maybe an installed piglin-paths
+        def mods = fileTree(bastion.get()) {
+            include '*.jar'
+            exclude '*%2B*', 'piglin-paths-*'
+        }
+        // production loaders unpack jar-in-jar (all of fabric-api's modules live there); a dev classpath doesn't
+        def nested = file('build/bastion-nested')
+        delete nested
+        copy {
+            from(mods.files.collect { zipTree(it) }) {
+                include 'META-INF/jars/*.jar'
+                eachFile { it.path = it.name }
+            }
+            into nested
+            includeEmptyDirs = false
+            duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+        }
+        modLocalRuntime mods
+        modLocalRuntime fileTree(nested) { include '*.jar' }
+    } else {
+        // what the bastion2 instance runs that touches rendering or pathfinding, copied into libs/
+        modLocalRuntime files('libs/sodium-2.5.1+1.16.1.jar', 'libs/speedrunapi-2.1+1.16-1.16.1.jar', 'libs/lithium-1.0+backport-0.6.7+1.16.1.jar')
+    }
+}
+
+processResources {
+    inputs.property 'version', project.version
+    filesMatching('fabric.mod.json') {
+        expand 'version': inputs.properties.version
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.encoding = 'UTF-8'
+    it.options.release = 17
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+tasks.named('runE2e') {
+    doFirst {
+        // options.txt too, or the keys come back bound from the last run
+        delete 'e2e-artifacts', 'run-e2e/saves', 'run-e2e/options.txt'
+    }
+}
+
+tasks.register('e2e') {
+    group = 'verification'
+    description = 'Boots a client with Sodium and Lithium, builds two scenes and checks the overlay against vanilla pathfinding.'
+    dependsOn 'runE2e'
+    doLast {
+        def report = file('e2e-artifacts/report.json')
+        if (!report.exists()) {
+            throw new GradleException('no e2e-artifacts/report.json, the client did not finish')
+        }
+        def json = new groovy.json.JsonSlurper().parse(report)
+        json.checks.findAll { !it.pass }.each {
+            logger.error("FAIL ${it.name}: expected ${it.expected}, got ${it.actual}")
+        }
+        if (!json.passed) {
+            throw new GradleException("piglin paths e2e failed${json.error ? ': ' + json.error : ''}")
+        }
+        logger.lifecycle("piglin paths e2e passed ${json.checks.size()} checks, artifacts in e2e-artifacts/")
+    }
+}

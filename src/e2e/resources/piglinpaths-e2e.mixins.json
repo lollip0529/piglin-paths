@@ -1,0 +1,12 @@
+{
+    "required": true,
+    "minVersion": "0.8",
+    "package": "io.github.lollip0529.piglinpaths.e2e.mixin",
+    "compatibilityLevel": "JAVA_17",
+    "client": [
+        "ClientTickMixin"
+    ],
+    "injectors": {
+        "defaultRequire": 1
+    }
+}

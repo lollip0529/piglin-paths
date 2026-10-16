@@ -1,0 +1,20 @@
+{
+    "schemaVersion": 1,
+    "id": "piglinpaths",
+    "version": "${version}",
+    "name": "Piglin Paths",
+    "description": "Outlines the blocks piglins can't pathfind to, and how many piglins can reach each block.",
+    "authors": [
+        "lollip0529"
+    ],
+    "license": "LGPL-3.0-only",
+    "environment": "client",
+    "mixins": [
+        "piglinpaths.mixins.json"
+    ],
+    "depends": {
+        "fabricloader": ">=0.15.0",
+        "minecraft": "1.16.1",
+        "java": ">=17"
+    }
+}
