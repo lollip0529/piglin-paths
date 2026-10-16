@@ -59,7 +59,7 @@ public final class PiglinPaths {
     // the piglin the piglin stick was used on, and everywhere it can path to
     public static int picked = -1;
     public static LongSet pickedBlocks;
-    // the block the piglin stick was used on, and the piglins that can path onto it
+    // the block the piglin stick was used on, and the piglins that could get onto it chasing
     public static long target = NONE;
     public static final IntSet targetPiglins = new IntOpenHashSet();
     // what the last frame drew, for the e2e
@@ -117,6 +117,8 @@ public final class PiglinPaths {
     // again on the same block lets it go
     public static void target(BlockPos pos) {
         target = target == pos.asLong() ? NONE : pos.asLong();
+        // they need their chase worked out, which isn't done while nothing's targeted
+        for (Tracked t : tracked.values()) t.stale = true;
         dirty = true;
     }
 
@@ -178,6 +180,7 @@ public final class PiglinPaths {
             Tracked t = new Tracked();
             t.pos = next.getBlockPos().asLong();
             t.result = Reach.piglin(mc.world, next);
+            if (target != NONE) t.chase = Reach.chase(mc.world, next, mc.player);
             tracked.put(next.getEntityId(), t);
             changed = true;
         } while (System.nanoTime() - start < 8_000_000);
@@ -191,7 +194,8 @@ public final class PiglinPaths {
             targetPiglins.clear();
             if (target != NONE) {
                 for (Int2ObjectMap.Entry<Tracked> e : tracked.int2ObjectEntrySet()) {
-                    if (e.getValue().result.reached.contains(target)) targetPiglins.add(e.getIntKey());
+                    LongSet chase = e.getValue().chase;
+                    if (chase != null && chase.contains(target)) targetPiglins.add(e.getIntKey());
                 }
             }
         }
@@ -312,5 +316,6 @@ public final class PiglinPaths {
         int age;
         boolean stale;
         Reach.Piglin result;
+        LongSet chase;
     }
 }

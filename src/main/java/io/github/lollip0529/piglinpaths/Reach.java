@@ -5,6 +5,7 @@ import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongIterator;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
+import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.attribute.EntityAttributes;
 import net.minecraft.entity.ai.pathing.LandPathNodeMaker;
 import net.minecraft.entity.ai.pathing.Path;
@@ -97,6 +98,31 @@ public final class Reach {
             for (int h = 0; h < HAZARDS.length; h++) mob.setPathfindingPenalty(HAZARDS[h], saved[h]);
         }
         return p;
+    }
+
+    // everywhere it could get to chasing something: a path, walk to its end, path again, so no follow range, and
+    // the longer drops vanilla allows a mob with a target. lava still stops it
+    public static LongSet chase(World world, MobEntity mob, LivingEntity chasing) {
+        int r = 48;
+        BlockPos at = mob.getBlockPos();
+        ChunkCache cache = new ChunkCache(world, at.add(-r, -r, -r), at.add(r, r, r));
+        LivingEntity had = mob.getTarget();
+        // getSafeFallDistance reads the target; the client's piglin never uses it for anything else
+        mob.setTarget(chasing);
+        try {
+            Nodes nodes = new Nodes(mob);
+            nodes.init(cache, mob);
+            LongSet out = new LongOpenHashSet();
+            LongIterator it = nodes.reach(nodes.getStart(), r, false).iterator();
+            while (it.hasNext()) {
+                BlockPos pos = BlockPos.fromLong(it.nextLong());
+                out.add(nodes.floor(pos.getX(), pos.getY(), pos.getZ()));
+            }
+            nodes.release();
+            return out;
+        } finally {
+            mob.setTarget(had);
+        }
     }
 
     public static Reach of(Collection<Piglin> piglins) {

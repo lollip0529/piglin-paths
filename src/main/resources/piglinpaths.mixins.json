@@ -6,7 +6,6 @@
     "client": [
         "ClientPlayerInteractionManagerMixin",
         "ClientWorldMixin",
-        "EntityMixin",
         "EntityNavigationAccessor",
         "GameOptionsMixin",
         "KeyBindingAccessor",

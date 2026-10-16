@@ -19,9 +19,11 @@ import net.minecraft.client.tutorial.TutorialStep;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.client.util.ScreenshotUtils;
 import net.minecraft.entity.ai.pathing.Path;
+import net.minecraft.entity.ai.pathing.PathNode;
 import net.minecraft.entity.mob.PiglinEntity;
 import net.minecraft.resource.DataPackSettings;
 import net.minecraft.server.integrated.IntegratedServer;
+import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.structure.Structure;
 import net.minecraft.structure.StructurePlacementData;
@@ -65,6 +67,7 @@ import java.util.TreeSet;
  *   pool    lava at -4 4 6 on the floor inside a stone rim: the rim is red, the floor under the lava isn't
  *   magma   4 3 6: the floor round it is orange, the magma itself isn't
  *   wall    -12 4 9 .. 9 6 9, the floor behind it is past a long detour: not red
+ *   pit     12 1 12 .. 14 3 14, 3 deep with a piglin in it that can't climb out
  * Bridge, vanilla's bastion/bridge/bridge_pieces/bridge at 60 40 -8 over a lava basin, three piglins on the deck.
  *
  * Ways it can be wrong, each covered by a check:
@@ -75,12 +78,14 @@ import java.util.TreeSet;
  *   the marks aren't on the blocks, are hidden by a neighbour's, or show through a wall
  *   the renderer doesn't draw what the sets hold, or keeps drawing once toggled off
  *   the stick key doesn't give a piglin stick, or its right-click on a piglin doesn't show that piglin's findPathTo blocks
- *   its right-click on a block outlines other piglins than the ones whose findPathTo gets onto it
+ *   its right-click on a block outlines other piglins than the ones that get onto it chasing, path after path,
+ *   or doesn't turn a piglin already glowing in a team colour green
  */
 public final class E2e {
     private static final File OUT = new File(System.getProperty("piglinpaths.e2e.out", "e2e-artifacts"));
     private static final int BRIDGE_X = 60, BRIDGE_Y = 40, BRIDGE_Z = -8;
     private static final Box SCENES = new Box(-100, 0, -100, 200, 255, 100);
+    private static final int TEAM_RED = 0xFF5555;
     private static final String PIGLIN = " {NoAI:1b,PersistenceRequired:1b,IsImmuneToZombification:1b}";
     private static final InputUtil.Key OUTLINE_KEY = InputUtil.fromKeyCode(GLFW.GLFW_KEY_KP_1, 0);
     private static final InputUtil.Key COUNT_KEY = InputUtil.fromKeyCode(GLFW.GLFW_KEY_KP_2, 0);
@@ -153,6 +158,7 @@ public final class E2e {
                         "setblock 4 3 6 magma_block",
                         "fill -12 4 9 9 6 9 stone",
                         "summon piglin 0.5 4 0.5" + PIGLIN, "summon piglin 6.5 4 0.5" + PIGLIN,
+                        "fill 12 1 12 14 3 14 air", "summon piglin 13.5 1 13.5" + PIGLIN,
                         "tp @p 40 30 0 90 0"};
                 int[] r = server(mc, scene);
                 List<String> failed = new ArrayList<>();
@@ -257,7 +263,7 @@ public final class E2e {
                 check("count key turns counts on", "true / true", PiglinPaths.outlines + " / " + PiglinPaths.counts);
                 Reach r = PiglinPaths.reach;
                 if (r == null) throw new IllegalStateException("no reach computed with both on");
-                check("every piglin has a result by now", 5, E2e.<Map<?, ?>>get(null, PiglinPaths.class, "tracked").size());
+                check("every piglin has a result by now", 6, E2e.<Map<?, ?>>get(null, PiglinPaths.class, "tracked").size());
                 facts.put("red / orange / green / counted", r.red.size() + " / " + r.orange.size() + " / " + r.green.size() + " / " + r.counts.size());
                 facts.put("on the bridge, red / green / counted", bridge(r.red) + " / " + bridge(r.green) + " / " + bridge(r.counts.keySet()));
                 compare(mc, r);
@@ -438,45 +444,65 @@ public final class E2e {
                 return;
             case 26:
                 check("piglin stick on the same piglin puts it down", "-1 / 0", PiglinPaths.picked + " / " + PiglinPaths.blocksDrawn);
+                // the piglin at 0 4 0 already glows red from a team; picking a block it can reach has to make it green
+                server(mc, "team add red", "team modify red color red",
+                        "team join red @e[type=piglin,x=0.5,y=4,z=0.5,distance=..1]",
+                        "effect give @e[type=piglin,x=0.5,y=4,z=0.5,distance=..1] glowing 1000000 0 true",
+                        "tp @p 3.5 14 -12 0 45");
+                mc.options.hudHidden = true;
+                next(30);
+                return;
+            case 27: {
+                NativeImage img = shot(mc, "glow_before");
+                facts.put("team red outline pixels before the stick", count(img, TEAM_RED));
+                img.close();
                 // straight down onto 3 3 -3, between the two arena piglins
                 server(mc, "tp @p 3.5 5 -2.5 0 90");
                 next(20);
                 return;
-            case 27:
+            }
+            case 28:
                 check("crosshair on 3 3 -3", "3 3 -3", mc.crosshairTarget instanceof BlockHitResult
                         ? str(((BlockHitResult) mc.crosshairTarget).getBlockPos()) : String.valueOf(mc.crosshairTarget));
                 rightClick(mc);
-                next(10);
+                next(40);
                 return;
-            case 28: {
+            case 29:
                 check("piglin stick on a block targets it", BlockPos.asLong(3, 3, -3), PiglinPaths.target);
-                IntegratedServer server = mc.getServer();
-                Set<Integer> vanilla = server.submit(() -> {
-                    Set<Integer> out = new TreeSet<>();
-                    for (PiglinEntity p : server.getOverworld().getEntities(PiglinEntity.class, SCENES, e -> true)) {
-                        if (reaches(p, new BlockPos(3, 4, -3))) out.add(p.getEntityId());
-                    }
-                    return out;
-                }).join();
-                check("piglins outlined = the ones vanilla findPathTo gets onto the block", vanilla.toString(), outlined(mc, false).toString());
-                check("their outline is green", vanilla.toString(), outlined(mc, true).toString());
+                check("piglins outlined = the ones a chase gets onto 3 3 -3", chase(mc, new BlockPos(3, 4, -3)).toString(), outlined(mc).toString());
                 check("the target block is marked", 1, PiglinPaths.blocksDrawn);
                 server(mc, "tp @p 3.5 14 -12 0 45");
                 next(30);
                 return;
-            }
-            case 29:
-                shot(mc, "target").close();
-                server(mc, "tp @p 3.5 5 -2.5 0 90");
+            case 30: {
+                NativeImage img = shot(mc, "target");
+                int before = (Integer) facts.get("team red outline pixels before the stick");
+                int red = count(img, TEAM_RED), green = count(img, PiglinPaths.GREEN_RGB);
+                img.close();
+                check("glowing red piglin turns green: red before / red now / green now", "seen / 0 / seen",
+                        (before > 100 ? "seen" : "none " + before) + " / " + red + " / " + (green > 100 ? "seen" : "none " + green));
+                // 25 out on open floor: past one path's 16 blocks, so only a chase gets there
+                server(mc, "tp @p 0.5 6 -24.5 0 90");
                 next(20);
                 return;
-            case 30:
+            }
+            case 31:
                 rightClick(mc);
+                next(40);
+                return;
+            case 32: {
+                check("piglin stick on another block moves the target", BlockPos.asLong(0, 3, -25), PiglinPaths.target);
+                Set<Integer> chased = chase(mc, new BlockPos(0, 4, -25));
+                check("piglins outlined = the ones a chase gets onto 0 3 -25", chased.toString(), outlined(mc).toString());
+                check("both arena piglins chase that far, the one in the pit can't", 2, chased.size());
+                rightClick(mc);
+                mc.options.hudHidden = false;
                 next(5);
                 return;
-            case 31:
+            }
+            case 33:
                 check("piglin stick on the same block lets it go: targeted / outlined / marked", "false / [] / 0",
-                        (PiglinPaths.target == BlockPos.asLong(3, 3, -3)) + " / " + outlined(mc, false) + " / " + PiglinPaths.blocksDrawn);
+                        (PiglinPaths.target == BlockPos.asLong(0, 3, -25)) + " / " + outlined(mc) + " / " + PiglinPaths.blocksDrawn);
                 finish(mc, null);
                 return;
             default:
@@ -596,13 +622,43 @@ public final class E2e {
         return Math.abs(r - (rgb >> 16 & 0xFF)) < 40 && Math.abs(g - (rgb >> 8 & 0xFF)) < 40 && Math.abs(b - (rgb & 0xFF)) < 40;
     }
 
-    // client piglins the renderer will outline, or whose outline colour is green
-    private static Set<Integer> outlined(MinecraftClient mc, boolean green) {
+    // client piglins the mod outlines; vanilla glowing on its own doesn't count, the screenshots check colour
+    private static Set<Integer> outlined(MinecraftClient mc) {
         Set<Integer> out = new TreeSet<>();
         for (PiglinEntity p : mc.world.getEntities(PiglinEntity.class, SCENES, e -> true)) {
-            if (green ? p.getTeamColorValue() == PiglinPaths.GREEN_RGB : mc.method_27022(p)) out.add(p.getEntityId());
+            if (PiglinPaths.highlighted(p) && mc.method_27022(p)) out.add(p.getEntityId());
         }
         return out;
+    }
+
+    // the server's piglins chasing the player onto target the way vanilla does: a path, walk to its end, path again.
+    // having a target is also what lets them take longer drops
+    private static Set<Integer> chase(MinecraftClient mc, BlockPos target) {
+        IntegratedServer server = mc.getServer();
+        return server.submit(() -> {
+            ServerPlayerEntity player = server.getPlayerManager().getPlayerList().get(0);
+            Set<Integer> out = new TreeSet<>();
+            for (PiglinEntity p : server.getOverworld().getEntities(PiglinEntity.class, SCENES, e -> true)) {
+                double x = p.getX(), y = p.getY(), z = p.getZ();
+                p.setTarget(player);
+                for (int i = 0; i < 12; i++) {
+                    Path path = p.getNavigation().findPathTo(target, 0);
+                    if (path == null) break;
+                    if (path.reachesTarget()) {
+                        out.add(p.getEntityId());
+                        break;
+                    }
+                    PathNode end = path.getEnd();
+                    if (end.getPos().equals(p.getBlockPos())) break;
+                    p.refreshPositionAndAngles(end.x + 0.5, end.y, end.z + 0.5, 0, 0);
+                    p.setOnGround(true);
+                }
+                p.setTarget(null);
+                p.refreshPositionAndAngles(x, y, z, 0, 0);
+                p.setOnGround(true);
+            }
+            return out;
+        }).join();
     }
 
     private static String str(BlockPos p) {
